@@ -1,8 +1,52 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, Pressable, TextInput, Switch, TouchableOpacity } from 'react-native';
-import { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, Pressable, TextInput, Switch, TouchableOpacity, ScrollView, Keyboard, Platform } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
 import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
+
+const TurboStepper = ({ value, label, decrementFn, incrementFn, formatValue = v => v }) => {
+  const intervalRef = useRef(null);
+
+  const startTurbo = (fn) => {
+    fn();
+    intervalRef.current = setInterval(() => {
+      fn();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }, 100);
+  };
+
+  const stopTurbo = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+
+  return (
+    <View style={styles.settingsContainer}>
+      <Text style={styles.settingsLabel}>{label}</Text>
+      <View style={styles.stepperContainer}>
+        <Pressable
+          delayLongPress={100}
+          delayPressIn={0}
+          onPressIn={() => startTurbo(decrementFn)}
+          onPressOut={stopTurbo}
+          style={styles.stepperBtn}>
+          <Text style={styles.stepperBtnText}>-</Text>
+        </Pressable>
+        <Text style={styles.stepperValue}>{formatValue(value)}</Text>
+        <Pressable
+          delayLongPress={100}
+          delayPressIn={0}
+          onPressIn={() => startTurbo(incrementFn)}
+          onPressOut={stopTurbo}
+          style={styles.stepperBtn}>
+          <Text style={styles.stepperBtnText}>+</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+};
 
 export default function App() {
   useKeepAwake();
@@ -15,11 +59,36 @@ export default function App() {
   const [workIsTimed, setWorkIsTimed] = useState(false);
   const [workDuration, setWorkDuration] = useState(40);
   const [setCount, setSetCount] = useState(1);
+  const [targetSets, setTargetSets] = useState(3);
+
+  const [repsCompleted, setRepsCompleted] = useState('');
+  const [setHistory, setSetHistory] = useState([]);
+
+  const [isWorkExpanded, setIsWorkExpanded] = useState(false);
+  const [isRestExpanded, setIsRestExpanded] = useState(false);
+  const [isSetExpanded, setIsSetExpanded] = useState(false);
+
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Colors
   const workColor = '#4CAF50'; // Green
   const restColor = '#F44336'; // Red
   const backgroundColor = isWorkMode ? workColor : restColor;
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => setKeyboardHeight(e.endCoordinates.height)
+    );
+    const hideSubscription = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardHeight(0)
+    );
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -70,7 +139,18 @@ export default function App() {
   const handlePress = async () => {
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const newMode = !isWorkMode;
-    if (newMode) setSetCount(prev => prev + 1);
+
+    // Changing from Rest to Work -> new set starting
+    if (newMode) {
+      if (repsCompleted.trim() !== '') {
+        setSetHistory(prev => [...prev, `Set ${setCount}: ${repsCompleted} reps`]);
+      } else {
+        setSetHistory(prev => [...prev, `Set ${setCount}: Done`]);
+      }
+      setRepsCompleted('');
+      setSetCount(prev => prev + 1);
+    }
+
     setIsWorkMode(newMode);
     setTimeLeft(newMode ? (workIsTimed ? workDuration : 0) : restDuration);
   };
@@ -78,6 +158,7 @@ export default function App() {
   const handleResetSet = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSetCount(1);
+    setSetHistory([]);
   };
 
   const handlePresetPress = (duration) => {
@@ -98,14 +179,18 @@ export default function App() {
     }
   };
 
+  const handleTargetSetsChange = (change) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setTargetSets(prev => Math.max(1, prev + change));
+  };
+
   const formatTime = (seconds) => {
-    const isNegative = seconds < 0;
     const absSeconds = Math.abs(seconds);
     const mins = Math.floor(absSeconds / 60);
     const secs = absSeconds % 60;
     const paddedMins = mins.toString().padStart(2, '0');
     const paddedSecs = secs.toString().padStart(2, '0');
-    return `${isNegative ? '-' : ''}${paddedMins}:${paddedSecs}`;
+    return `${paddedMins}:${paddedSecs}`;
   };
 
   const isCuttingIntoSet = !isWorkMode && timeLeft < 0;
@@ -134,6 +219,9 @@ export default function App() {
 
         <View style={styles.timerContainer}>
           <TouchableOpacity activeOpacity={0.6} onPress={handlePress}>
+            {timeLeft < 0 && (
+              <Text style={styles.negativeSign}>-</Text>
+            )}
             <Text style={[styles.timerText, { color: timerColor }]} allowFontScaling={false}>
               {formatTime(timeLeft)}
             </Text>
@@ -147,72 +235,117 @@ export default function App() {
         </Text>
       </View>
 
-      <View style={styles.bottomControls}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionHeaderText}>WORK SETTINGS</Text>
-          <View style={styles.sectionLine} />
-        </View>
-
-        <View style={styles.settingsRow}>
-          <Text style={styles.settingsLabel}>Timed Mode</Text>
-          <Switch
-            value={workIsTimed}
-            onValueChange={setWorkIsTimed}
-            trackColor={{ false: '#767577', true: '#81b0ff' }}
-            thumbColor={workIsTimed ? '#f5dd4b' : '#f4f3f4'}
+      <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.repsContainer}>
+          <Text style={styles.settingsLabel}>Reps completed:</Text>
+          <TextInput
+            style={styles.repsInput}
+            value={repsCompleted}
+            onChangeText={setRepsCompleted}
+            placeholder="0"
+            placeholderTextColor="rgba(255,255,255,0.5)"
+            keyboardType="number-pad"
+            maxLength={3}
           />
         </View>
 
-        {workIsTimed && (
-          <View style={styles.settingsContainer}>
-            <Text style={styles.settingsLabel}>Work Duration</Text>
-            <View style={styles.stepperContainer}>
-              <Pressable onPress={() => handleDurationChange(true, -5)} style={styles.stepperBtn}>
-                <Text style={styles.stepperBtnText}>-</Text>
-              </Pressable>
-              <Text style={styles.stepperValue}>{workDuration}s</Text>
-              <Pressable onPress={() => handleDurationChange(true, 5)} style={styles.stepperBtn}>
-                <Text style={styles.stepperBtnText}>+</Text>
-              </Pressable>
+        <View style={styles.bottomControls}>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => setIsWorkExpanded(!isWorkExpanded)} style={styles.sectionHeader}>
+            <Text style={styles.sectionHeaderText}>WORK SETTINGS</Text>
+            <View style={styles.sectionLine} />
+            <Text style={styles.sectionHeaderIcon}>{isWorkExpanded ? '▼' : '▶'}</Text>
+          </TouchableOpacity>
+
+          {isWorkExpanded && (
+            <TurboStepper
+              label="Work Duration"
+              value={workDuration}
+              formatValue={v => `${v}s`}
+              decrementFn={() => handleDurationChange(true, -5)}
+              incrementFn={() => handleDurationChange(true, 5)}
+            />
+          )}
+
+          <TouchableOpacity activeOpacity={0.7} onPress={() => setIsRestExpanded(!isRestExpanded)} style={styles.sectionHeader}>
+            <Text style={styles.sectionHeaderText}>REST SETTINGS</Text>
+            <View style={styles.sectionLine} />
+            <Text style={styles.sectionHeaderIcon}>{isRestExpanded ? '▼' : '▶'}</Text>
+          </TouchableOpacity>
+
+          {isRestExpanded && (
+            <View>
+              <TurboStepper
+                label="Rest Duration"
+                value={restDuration}
+                formatValue={v => `${v}s`}
+                decrementFn={() => handleDurationChange(false, -5)}
+                incrementFn={() => handleDurationChange(false, 5)}
+              />
+              <View style={styles.endActionContainer}>
+                <Text style={styles.settingsLabel}>Rest End Action</Text>
+                <View style={styles.segmentContainer}>
+                  {['Auto-Start', 'Hard Stop', 'Overtime'].map(action => (
+                    <Pressable
+                      key={action}
+                      style={[styles.segmentBtn, restEndAction === action && styles.segmentBtnActive]}
+                      onPress={() => setRestEndAction(action)}
+                    >
+                      <Text style={[styles.segmentBtnText, restEndAction === action && styles.segmentBtnTextActive]}>
+                        {action}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
             </View>
-          </View>
-        )}
+          )}
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionHeaderText}>REST SETTINGS</Text>
-          <View style={styles.sectionLine} />
-        </View>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => setIsSetExpanded(!isSetExpanded)} style={styles.sectionHeader}>
+            <Text style={styles.sectionHeaderText}>SET SETTINGS</Text>
+            <View style={styles.sectionLine} />
+            <Text style={styles.sectionHeaderIcon}>{isSetExpanded ? '▼' : '▶'}</Text>
+          </TouchableOpacity>
 
-        <View style={styles.settingsContainer}>
-          <Text style={styles.settingsLabel}>Rest Duration</Text>
-          <View style={styles.stepperContainer}>
-            <Pressable onPress={() => handleDurationChange(false, -5)} style={styles.stepperBtn}>
-              <Text style={styles.stepperBtnText}>-</Text>
-            </Pressable>
-            <Text style={styles.stepperValue}>{restDuration}s</Text>
-            <Pressable onPress={() => handleDurationChange(false, 5)} style={styles.stepperBtn}>
-              <Text style={styles.stepperBtnText}>+</Text>
-            </Pressable>
-          </View>
-        </View>
+          {isSetExpanded && (
+            <View>
+              <View style={styles.settingsRow}>
+                <Text style={styles.settingsLabel}>Timed Mode</Text>
+                <Switch
+                  value={workIsTimed}
+                  onValueChange={setWorkIsTimed}
+                  trackColor={{ false: '#767577', true: '#81b0ff' }}
+                  thumbColor={workIsTimed ? '#f5dd4b' : '#f4f3f4'}
+                />
+              </View>
+              <TurboStepper
+                label="Target Sets"
+                value={targetSets}
+                decrementFn={() => handleTargetSetsChange(-1)}
+                incrementFn={() => handleTargetSetsChange(1)}
+              />
+            </View>
+          )}
 
-        <View style={styles.endActionContainer}>
-          <Text style={styles.settingsLabel}>Rest End Action</Text>
-          <View style={styles.segmentContainer}>
-            {['Auto-Start', 'Hard Stop', 'Overtime'].map(action => (
-              <Pressable
-                key={action}
-                style={[styles.segmentBtn, restEndAction === action && styles.segmentBtnActive]}
-                onPress={() => setRestEndAction(action)}
-              >
-                <Text style={[styles.segmentBtnText, restEndAction === action && styles.segmentBtnTextActive]}>
-                  {action}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          {setHistory.length > 0 && (
+            <View style={styles.historyContainer}>
+              <Text style={styles.historyTitle}>Set History</Text>
+              {setHistory.map((entry, index) => (
+                <Text key={index} style={styles.historyText}>{entry}</Text>
+              ))}
+            </View>
+          )}
         </View>
-      </View>
+      </ScrollView>
+
+      {keyboardHeight > 0 && (
+        <TouchableOpacity
+          style={[styles.doneButton, { bottom: keyboardHeight + 10 }]}
+          onPress={() => Keyboard.dismiss()}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.doneButtonText}>DONE</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -373,5 +506,78 @@ const styles = StyleSheet.create({
   },
   segmentBtnTextActive: {
     color: '#000',
+  },
+  negativeSign: {
+    color: '#FFEB3B',
+    fontSize: 60,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: -20,
+    lineHeight: 60,
+  },
+  scrollContainer: {
+    width: '100%',
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+    alignItems: 'center',
+  },
+  repsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 15,
+  },
+  repsInput: {
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    color: '#FFF',
+    fontSize: 24,
+    fontWeight: 'bold',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    minWidth: 80,
+    textAlign: 'center',
+    marginLeft: 10,
+  },
+  sectionHeaderIcon: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    marginLeft: 10,
+  },
+  historyContainer: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+    width: '100%',
+  },
+  historyTitle: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  historyText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    marginBottom: 5,
+    textAlign: 'center',
+  },
+  doneButton: {
+    position: 'absolute',
+    right: 20,
+    backgroundColor: '#FFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    zIndex: 9999,
+  },
+  doneButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
