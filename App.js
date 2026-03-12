@@ -237,7 +237,7 @@ export default function App() {
 
       <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.repsContainer}>
-          <Text style={styles.settingsLabel}>Reps completed:</Text>
+          <Text style={styles.repsLabel}>Reps completed:</Text>
           <TextInput
             style={styles.repsInput}
             value={repsCompleted}
@@ -339,7 +339,7 @@ export default function App() {
 
       {keyboardHeight > 0 && (
         <TouchableOpacity
-          style={[styles.doneButton, { bottom: keyboardHeight + 10 }]}
+          style={[styles.doneButton, { bottom: keyboardHeight + 15 }]}
           onPress={() => Keyboard.dismiss()}
           activeOpacity={0.8}
         >
@@ -362,7 +362,8 @@ const styles = StyleSheet.create({
     flex: 1,
     zIndex: 1, // Ensure it sits above the absolute Pressable
     width: '100%',
-    paddingVertical: 40,
+    paddingTop: 40,
+    paddingBottom: 0,
   },
   setHeaderContainer: {
     marginBottom: 20,
@@ -452,6 +453,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  repsLabel: {
+    color: '#FFF',
+    marginRight: 10,
+    fontSize: 16,
+    fontWeight: '500',
+    marginLeft: -20,
+  },
   stepperContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -518,6 +526,7 @@ const styles = StyleSheet.create({
   scrollContainer: {
     width: '100%',
     flex: 1,
+    marginTop: 5,
   },
   scrollContent: {
     paddingBottom: 40,
@@ -528,6 +537,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginVertical: 15,
+    marginRight: 120,
   },
   repsInput: {
     backgroundColor: 'rgba(0,0,0,0.1)',
@@ -535,11 +545,10 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     borderRadius: 8,
-    paddingHorizontal: 15,
     paddingVertical: 10,
-    minWidth: 80,
+    width: 90,
     textAlign: 'center',
-    marginLeft: 10,
+    marginLeft: 1,
   },
   sectionHeaderIcon: {
     color: 'rgba(255,255,255,0.6)',
@@ -570,14 +579,16 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 20,
     backgroundColor: '#FFF',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
+    width: 100,
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
     zIndex: 9999,
   },
   doneButtonText: {
     color: '#000',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 22,
+    fontWeight: '900',
   },
 });
