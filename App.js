@@ -66,7 +66,6 @@ export default function App() {
 
   const [isWorkExpanded, setIsWorkExpanded] = useState(false);
   const [isRestExpanded, setIsRestExpanded] = useState(false);
-  const [isSetExpanded, setIsSetExpanded] = useState(false);
 
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
@@ -251,19 +250,42 @@ export default function App() {
 
         <View style={styles.bottomControls}>
           <TouchableOpacity activeOpacity={0.7} onPress={() => setIsWorkExpanded(!isWorkExpanded)} style={styles.sectionHeader}>
-            <Text style={styles.sectionHeaderText}>WORK SETTINGS</Text>
+            <Text style={styles.sectionHeaderText}>SESSION SETTINGS</Text>
             <View style={styles.sectionLine} />
             <Text style={styles.sectionHeaderIcon}>{isWorkExpanded ? '▼' : '▶'}</Text>
           </TouchableOpacity>
 
           {isWorkExpanded && (
-            <TurboStepper
-              label="Work Duration"
-              value={workDuration}
-              formatValue={v => `${v}s`}
-              decrementFn={() => handleDurationChange(true, -5)}
-              incrementFn={() => handleDurationChange(true, 5)}
-            />
+            <View>
+              <TurboStepper
+                label="Target Sets"
+                value={targetSets}
+                decrementFn={() => handleTargetSetsChange(-1)}
+                incrementFn={() => handleTargetSetsChange(1)}
+              />
+              <View style={styles.settingsRow}>
+                <Text style={styles.settingsLabel}>Timed Mode</Text>
+                <Switch
+                  value={workIsTimed}
+                  onValueChange={setWorkIsTimed}
+                  trackColor={{ false: '#767577', true: '#81b0ff' }}
+                  thumbColor={workIsTimed ? '#f5dd4b' : '#f4f3f4'}
+                />
+              </View>
+
+              {workIsTimed && (
+                <>
+                  <View style={styles.settingsDivider} />
+                  <TurboStepper
+                    label="Work Duration"
+                    value={workDuration}
+                    formatValue={v => `${v}s`}
+                    decrementFn={() => handleDurationChange(true, -5)}
+                    incrementFn={() => handleDurationChange(true, 5)}
+                  />
+                </>
+              )}
+            </View>
           )}
 
           <TouchableOpacity activeOpacity={0.7} onPress={() => setIsRestExpanded(!isRestExpanded)} style={styles.sectionHeader}>
@@ -300,31 +322,7 @@ export default function App() {
             </View>
           )}
 
-          <TouchableOpacity activeOpacity={0.7} onPress={() => setIsSetExpanded(!isSetExpanded)} style={styles.sectionHeader}>
-            <Text style={styles.sectionHeaderText}>SET SETTINGS</Text>
-            <View style={styles.sectionLine} />
-            <Text style={styles.sectionHeaderIcon}>{isSetExpanded ? '▼' : '▶'}</Text>
-          </TouchableOpacity>
 
-          {isSetExpanded && (
-            <View>
-              <View style={styles.settingsRow}>
-                <Text style={styles.settingsLabel}>Timed Mode</Text>
-                <Switch
-                  value={workIsTimed}
-                  onValueChange={setWorkIsTimed}
-                  trackColor={{ false: '#767577', true: '#81b0ff' }}
-                  thumbColor={workIsTimed ? '#f5dd4b' : '#f4f3f4'}
-                />
-              </View>
-              <TurboStepper
-                label="Target Sets"
-                value={targetSets}
-                decrementFn={() => handleTargetSetsChange(-1)}
-                incrementFn={() => handleTargetSetsChange(1)}
-              />
-            </View>
-          )}
 
           {setHistory.length > 0 && (
             <View style={styles.historyContainer}>
@@ -412,7 +410,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   bottomControls: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 5,
     paddingBottom: 40,
     zIndex: 1,
     width: '100%',
@@ -439,6 +438,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 15,
+  },
+  settingsDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
     marginBottom: 15,
   },
   settingsContainer: {
@@ -536,7 +540,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 15,
+    marginVertical: 0,
     marginRight: 120,
   },
   repsInput: {
