@@ -1,17 +1,17 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, Pressable, TextInput, Switch, TouchableOpacity, ScrollView, Keyboard, Platform } from 'react-native';
+import { StyleSheet, Text, View, Pressable, TextInput, Switch, TouchableOpacity, ScrollView, Keyboard, Platform, Modal } from 'react-native';
 import { useState, useEffect, useRef } from 'react';
 import * as Haptics from 'expo-haptics';
 import { useKeepAwake } from 'expo-keep-awake';
 
-const TurboStepper = ({ value, label, decrementFn, incrementFn, formatValue = v => v }) => {
+const TurboStepper = ({ value, label, decrementFn, incrementFn, formatValue = v => v, triggerHaptic = () => {} }) => {
   const intervalRef = useRef(null);
 
   const startTurbo = (fn) => {
     fn();
     intervalRef.current = setInterval(() => {
       fn();
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      triggerHaptic();
     }, 100);
   };
 
@@ -60,6 +60,22 @@ export default function App() {
   const [workDuration, setWorkDuration] = useState(40);
   const [setCount, setSetCount] = useState(1);
   const [targetSets, setTargetSets] = useState(3);
+
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [soundAlerts, setSoundAlerts] = useState(true);
+  const [hapticLevel, setHapticLevel] = useState(2);
+  const [showConfirmReset, setShowConfirmReset] = useState(false);
+
+  const triggerHaptic = (isNotification = false) => {
+    if (hapticLevel === 0) return;
+    if (isNotification) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (hapticLevel === 1) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } else if (hapticLevel === 2) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    }
+  };
 
   const [repsCompleted, setRepsCompleted] = useState('');
   const [setHistory, setSetHistory] = useState([]);
@@ -112,31 +128,31 @@ export default function App() {
     const isCountingDown = !isWorkMode || (isWorkMode && workIsTimed);
     if (isCountingDown) {
       if (timeLeft === 3 || timeLeft === 2 || timeLeft === 1) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        triggerHaptic();
       }
       if (timeLeft === 0) {
         if (isWorkMode) {
           // Work timer hit 0: Auto switch to Rest
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          triggerHaptic(true);
           setIsWorkMode(false);
           setTimeLeft(restDuration);
         } else {
           // Rest timer hit 0: Respect restEndAction
           if (restEndAction === 'Auto-Start') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            triggerHaptic(true);
             setIsWorkMode(true);
             setSetCount(prev => prev + 1);
             setTimeLeft(workIsTimed ? workDuration : 0);
           } else if (restEndAction === 'Hard Stop') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            triggerHaptic(true);
           }
         }
       }
     }
-  }, [timeLeft, isWorkMode, restEndAction, workIsTimed, workDuration, restDuration]);
+  }, [timeLeft, isWorkMode, restEndAction, workIsTimed, workDuration, restDuration, hapticLevel]);
 
   const handlePress = async () => {
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    triggerHaptic(true);
     const newMode = !isWorkMode;
 
     // Changing from Rest to Work -> new set starting
@@ -155,13 +171,13 @@ export default function App() {
   };
 
   const handleResetSet = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    triggerHaptic();
     setSetCount(1);
     setSetHistory([]);
   };
 
   const handlePresetPress = (duration) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    triggerHaptic();
     if (isWorkMode && workIsTimed) {
       setWorkDuration(duration);
     } else {
@@ -170,7 +186,7 @@ export default function App() {
   };
 
   const handleDurationChange = (isWork, change) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    triggerHaptic();
     if (isWork) {
       setWorkDuration(r => Math.max(5, r + change));
     } else {
@@ -179,7 +195,7 @@ export default function App() {
   };
 
   const handleTargetSetsChange = (change) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    triggerHaptic();
     setTargetSets(prev => Math.max(1, prev + change));
   };
 
@@ -198,6 +214,105 @@ export default function App() {
   return (
     <View style={[styles.container, { backgroundColor }]}>
       <StatusBar style="light" />
+
+      {/* Settings Trigger */}
+      <TouchableOpacity 
+        style={styles.settingsTrigger} 
+        onPress={() => setSettingsVisible(true)}
+      >
+        <Text style={styles.settingsTriggerText}>⚙️</Text>
+      </TouchableOpacity>
+
+      {/* Settings Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={settingsVisible}
+        onRequestClose={() => {
+          setSettingsVisible(false);
+          setShowConfirmReset(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>CONTROL PANEL</Text>
+              <TouchableOpacity onPress={() => {
+                setSettingsVisible(false);
+                setShowConfirmReset(false);
+              }}>
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={[styles.settingsRow, { width: '100%' }]}>
+              <Text style={styles.settingsLabelDark}>Sound Alerts</Text>
+              <Switch
+                value={soundAlerts}
+                onValueChange={setSoundAlerts}
+                trackColor={{ false: '#767577', true: workColor }}
+                thumbColor={soundAlerts ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+            
+            <View style={[styles.settingsRow, { width: '100%', flexDirection: 'column', alignItems: 'flex-start' }]}>
+              <Text style={[styles.settingsLabelDark, { marginBottom: 10 }]}>HAPTIC INTENSITY</Text>
+              <View style={[styles.segmentContainer, { marginTop: 0 }]}>
+                {['OFF', 'LOW', 'HIGH'].map((levelStr, index) => (
+                  <Pressable
+                    key={levelStr}
+                    style={[
+                      styles.segmentBtn,
+                      hapticLevel === index && { backgroundColor: workColor }
+                    ]}
+                    onPress={() => setHapticLevel(index)}
+                  >
+                    <Text style={[
+                      styles.segmentBtnText,
+                      hapticLevel === index && styles.segmentBtnTextActive
+                    ]}>
+                      {levelStr}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            {showConfirmReset ? (
+              <View style={styles.confirmResetContainer}>
+                <Text style={styles.confirmResetText}>Are you sure? This will delete all sets.</Text>
+                <View style={styles.confirmResetRow}>
+                  <TouchableOpacity 
+                    style={[styles.resetWorkoutBtn, styles.cancelResetBtn]}
+                    onPress={() => setShowConfirmReset(false)}
+                  >
+                    <Text style={styles.cancelResetBtnText}>CANCEL</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.resetWorkoutBtn, styles.confirmResetBtn]}
+                    onPress={() => {
+                      handleResetSet();
+                      setIsWorkMode(true);
+                      setTimeLeft(workIsTimed ? workDuration : 0);
+                      setSettingsVisible(false);
+                      setShowConfirmReset(false);
+                    }}
+                  >
+                    <Text style={styles.resetWorkoutBtnText}>YES, RESET</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity 
+                style={styles.resetWorkoutBtn}
+                onPress={() => setShowConfirmReset(true)}
+              >
+                <Text style={styles.resetWorkoutBtnText}>RESET WORKOUT</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Background press area */}
       <Pressable style={StyleSheet.absoluteFillObject} onPress={handlePress} />
@@ -262,6 +377,7 @@ export default function App() {
                 value={targetSets}
                 decrementFn={() => handleTargetSetsChange(-1)}
                 incrementFn={() => handleTargetSetsChange(1)}
+                triggerHaptic={triggerHaptic}
               />
               <View style={styles.settingsRow}>
                 <Text style={styles.settingsLabel}>Timed Mode</Text>
@@ -282,6 +398,7 @@ export default function App() {
                     formatValue={v => `${v}s`}
                     decrementFn={() => handleDurationChange(true, -5)}
                     incrementFn={() => handleDurationChange(true, 5)}
+                    triggerHaptic={triggerHaptic}
                   />
                 </>
               )}
@@ -302,6 +419,7 @@ export default function App() {
                 formatValue={v => `${v}s`}
                 decrementFn={() => handleDurationChange(false, -5)}
                 incrementFn={() => handleDurationChange(false, 5)}
+                triggerHaptic={triggerHaptic}
               />
               <View style={styles.endActionContainer}>
                 <Text style={styles.settingsLabel}>Rest End Action</Text>
@@ -338,7 +456,10 @@ export default function App() {
       {keyboardHeight > 0 && (
         <TouchableOpacity
           style={[styles.doneButton, { bottom: keyboardHeight + 15 }]}
-          onPress={() => Keyboard.dismiss()}
+          onPress={() => {
+            triggerHaptic();
+            Keyboard.dismiss();
+          }}
           activeOpacity={0.8}
         >
           <Text style={styles.doneButtonText}>DONE</Text>
@@ -594,5 +715,110 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 22,
     fontWeight: '900',
+  },
+  settingsTrigger: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 22,
+  },
+  settingsTriggerText: {
+    fontSize: 24,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCard: {
+    width: '85%',
+    backgroundColor: '#333',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFF',
+    letterSpacing: 2,
+  },
+  modalCloseText: {
+    fontSize: 24,
+    color: 'rgba(255,255,255,0.5)',
+    fontWeight: 'bold',
+  },
+  settingsLabelDark: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  resetWorkoutBtn: {
+    marginTop: 20,
+    backgroundColor: '#F44336',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    width: '100%',
+  },
+  resetWorkoutBtnText: {
+    color: '#FFF',
+    fontWeight: '900',
+    fontSize: 16,
+    textAlign: 'center',
+    letterSpacing: 1.5,
+  },
+  confirmResetContainer: {
+    marginTop: 20,
+    width: '100%',
+    alignItems: 'center',
+  },
+  confirmResetText: {
+    color: '#FFF',
+    fontSize: 14,
+    marginBottom: 15,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  confirmResetRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  cancelResetBtn: {
+    backgroundColor: '#555',
+    flex: 1,
+    marginRight: 10,
+    marginTop: 0,
+  },
+  confirmResetBtn: {
+    flex: 1,
+    marginLeft: 10,
+    marginTop: 0,
+  },
+  cancelResetBtnText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 14,
+    textAlign: 'center',
   },
 });
