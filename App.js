@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View, Pressable, TextInput, Switch, TouchableOpacity, ScrollView, Keyboard, Platform, Modal } from 'react-native';
 import { useState, useEffect, useRef } from 'react';
 import * as Haptics from 'expo-haptics';
+import { Audio } from 'expo-av';
 import { useKeepAwake } from 'expo-keep-awake';
 
 const TurboStepper = ({ value, label, decrementFn, incrementFn, formatValue = v => v, triggerHaptic = () => {} }) => {
@@ -68,12 +69,69 @@ export default function App() {
 
   const triggerHaptic = (isNotification = false) => {
     if (hapticLevel === 0) return;
-    if (isNotification) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else if (hapticLevel === 1) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    if (hapticLevel === 1) {
+      if (isNotification) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } else {
+        Haptics.selectionAsync();
+      }
     } else if (hapticLevel === 2) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      if (isNotification) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      }
+    }
+  };
+
+  const tickSoundRef = useRef();
+  const chimeSoundRef = useRef();
+
+  useEffect(() => {
+    // Attempt to configure audio to play even if physical silent switch is flipped
+    Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+    });
+
+    return () => {
+      // Memory management: unload sounds when component unmounts
+      if (tickSoundRef.current) {
+        tickSoundRef.current.unloadAsync();
+        tickSoundRef.current = null;
+      }
+      if (chimeSoundRef.current) {
+        chimeSoundRef.current.unloadAsync();
+        chimeSoundRef.current = null;
+      }
+    };
+  }, []);
+
+  const playSound = async (type) => {
+    if (!soundAlerts) return;
+    
+    try {
+      if (type === 'tick') {
+        if (!tickSoundRef.current) {
+          const { sound } = await Audio.Sound.createAsync(
+            require('./assets/tick.wav')
+          );
+          tickSoundRef.current = sound;
+        }
+        await tickSoundRef.current.replayAsync();
+      } else if (type === 'chime') {
+        if (!chimeSoundRef.current) {
+          const { sound } = await Audio.Sound.createAsync(
+            require('./assets/chime.wav')
+          );
+          chimeSoundRef.current = sound;
+        }
+        await chimeSoundRef.current.replayAsync();
+      }
+    } catch (error) {
+      alert('Error playing sound: ' + error.message);
     }
   };
 
@@ -129,30 +187,35 @@ export default function App() {
     if (isCountingDown) {
       if (timeLeft === 3 || timeLeft === 2 || timeLeft === 1) {
         triggerHaptic();
+        playSound('tick');
       }
       if (timeLeft === 0) {
         if (isWorkMode) {
           // Work timer hit 0: Auto switch to Rest
           triggerHaptic(true);
+          playSound('chime');
           setIsWorkMode(false);
           setTimeLeft(restDuration);
         } else {
           // Rest timer hit 0: Respect restEndAction
           if (restEndAction === 'Auto-Start') {
             triggerHaptic(true);
+            playSound('chime');
             setIsWorkMode(true);
             setSetCount(prev => prev + 1);
             setTimeLeft(workIsTimed ? workDuration : 0);
           } else if (restEndAction === 'Hard Stop') {
             triggerHaptic(true);
+            playSound('chime');
           }
         }
       }
     }
-  }, [timeLeft, isWorkMode, restEndAction, workIsTimed, workDuration, restDuration, hapticLevel]);
+  }, [timeLeft, isWorkMode, restEndAction, workIsTimed, workDuration, restDuration, hapticLevel, soundAlerts]);
 
   const handlePress = async () => {
     triggerHaptic(true);
+    if (!isWorkMode) playSound('chime');
     const newMode = !isWorkMode;
 
     // Changing from Rest to Work -> new set starting
@@ -265,7 +328,16 @@ export default function App() {
                       styles.segmentBtn,
                       hapticLevel === index && { backgroundColor: workColor }
                     ]}
-                    onPress={() => setHapticLevel(index)}
+                    onPress={() => {
+                      setHapticLevel(index);
+                      if (index === 0) {
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                      } else if (index === 1) {
+                        Haptics.selectionAsync();
+                      } else if (index === 2) {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                      }
+                    }}
                   >
                     <Text style={[
                       styles.segmentBtnText,
@@ -348,6 +420,8 @@ export default function App() {
           {isWorkMode ? 'WORK' : 'REST'}
         </Text>
       </View>
+
+      <View style={styles.hudDivider} />
 
       <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.repsContainer}>
@@ -543,6 +617,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginTop: 10,
   },
+  hudDivider: {
+    height: 2,
+    width: '90%',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    alignSelf: 'center',
+    marginVertical: 0,
+  },
   sectionHeaderText: {
     color: 'rgba(255,255,255,0.6)',
     fontSize: 12,
@@ -651,7 +732,7 @@ const styles = StyleSheet.create({
   scrollContainer: {
     width: '100%',
     flex: 1,
-    marginTop: 5,
+    marginTop: 4,
   },
   scrollContent: {
     paddingBottom: 40,
