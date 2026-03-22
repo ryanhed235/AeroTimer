@@ -5,22 +5,41 @@ import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
 import { useKeepAwake } from 'expo-keep-awake';
 
-const TurboStepper = ({ value, label, decrementFn, incrementFn, formatValue = v => v, triggerHaptic = () => {} }) => {
+const tickAsset = require('./assets/sounds/tick.wav');
+const doneAsset = require('./assets/sounds/done.wav');
+const finalDoneAsset = require('./assets/sounds/final_done.wav');
+
+const TurboStepper = ({ value, label, decrementFn, incrementFn, formatValue = v => v, triggerHaptic = () => {}, turboDelay = 100 }) => {
   const intervalRef = useRef(null);
+  const timeoutRef = useRef(null);
+
+  const prevValueRef = useRef(value);
+  useEffect(() => {
+    if (prevValueRef.current !== value) {
+      triggerHaptic();
+      prevValueRef.current = value;
+    }
+  }, [value]);
+
+  useEffect(() => {
+    return () => stopTurbo();
+  }, []);
 
   const startTurbo = (fn) => {
+    stopTurbo(); // Kill any existing ghost intervals from rapid taps
     fn();
-    intervalRef.current = setInterval(() => {
-      fn();
-      triggerHaptic();
-    }, 100);
+    timeoutRef.current = setTimeout(() => {
+      intervalRef.current = setInterval(() => {
+        fn();
+      }, 150);
+    }, 400); // Wait 400ms before turbo engages
   };
 
   const stopTurbo = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    timeoutRef.current = null;
+    intervalRef.current = null;
   };
 
   return (
@@ -67,6 +86,24 @@ export default function App() {
   const [hapticLevel, setHapticLevel] = useState(2);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
 
+  // Phase 10.1 Audio Configuration States
+  const [countdownSeconds, setCountdownSeconds] = useState(3);
+  const [alertVolume, setAlertVolume] = useState(1.0);
+  const [soundStartWork, setSoundStartWork] = useState('Done');
+  const [soundRestCountdown, setSoundRestCountdown] = useState('Tick');
+  const [soundOvertime, setSoundOvertime] = useState('Silent');
+  const [soundEndWork, setSoundEndWork] = useState('Done');
+  const [isAudioExpanded, setIsAudioExpanded] = useState(false);
+
+  const handleVolumeChange = (delta) => {
+    setAlertVolume(prev => {
+      const newVal = prev + delta;
+      if (newVal < 0) return 0;
+      if (newVal > 1.0) return 1.0;
+      return Number(newVal.toFixed(1));
+    });
+  };
+
   const triggerHaptic = (isNotification = false) => {
     if (hapticLevel === 0) return;
     
@@ -85,8 +122,9 @@ export default function App() {
     }
   };
 
-  const tickSoundRef = useRef();
-  const chimeSoundRef = useRef();
+  const tickSoundRef = useRef(null);
+  const doneSoundRef = useRef(null);
+  const finalDoneSoundRef = useRef(null);
 
   useEffect(() => {
     // Attempt to configure audio to play even if physical silent switch is flipped
@@ -96,42 +134,54 @@ export default function App() {
       shouldDuckAndroid: true,
     });
 
+    const loadSounds = async () => {
+      try {
+        const { sound: t } = await Audio.Sound.createAsync(tickAsset);
+        tickSoundRef.current = t;
+        
+        const { sound: s } = await Audio.Sound.createAsync(doneAsset);
+        doneSoundRef.current = s;
+        
+        const { sound: b } = await Audio.Sound.createAsync(finalDoneAsset);
+        finalDoneSoundRef.current = b;
+      } catch (e) {
+        console.log("Preload error:", e.message);
+      }
+    };
+    loadSounds();
+
     return () => {
       // Memory management: unload sounds when component unmounts
       if (tickSoundRef.current) {
         tickSoundRef.current.unloadAsync();
         tickSoundRef.current = null;
       }
-      if (chimeSoundRef.current) {
-        chimeSoundRef.current.unloadAsync();
-        chimeSoundRef.current = null;
+      if (doneSoundRef.current) {
+        doneSoundRef.current.unloadAsync();
+        doneSoundRef.current = null;
+      }
+      if (finalDoneSoundRef.current) {
+        finalDoneSoundRef.current.unloadAsync();
+        finalDoneSoundRef.current = null;
       }
     };
   }, []);
 
-  const playSound = async (type) => {
-    if (!soundAlerts) return;
+  const playSound = async (type, forceVolume = alertVolume) => {
+    if (!soundAlerts || type === 'Silent') return;
     
     try {
-      if (type === 'tick') {
-        if (!tickSoundRef.current) {
-          const { sound } = await Audio.Sound.createAsync(
-            require('./assets/tick.wav')
-          );
-          tickSoundRef.current = sound;
-        }
-        await tickSoundRef.current.replayAsync();
-      } else if (type === 'chime') {
-        if (!chimeSoundRef.current) {
-          const { sound } = await Audio.Sound.createAsync(
-            require('./assets/chime.wav')
-          );
-          chimeSoundRef.current = sound;
-        }
-        await chimeSoundRef.current.replayAsync();
+      let ref = null;
+      if (type === 'Tick') ref = tickSoundRef.current;
+      else if (type === 'Done') ref = doneSoundRef.current;
+      else if (type === 'FinalDone') ref = finalDoneSoundRef.current;
+
+      if (ref) {
+        await ref.setVolumeAsync(forceVolume);
+        await ref.replayAsync();
       }
     } catch (error) {
-      alert('Error playing sound: ' + error.message);
+      console.log('Error playing sound: ' + error.message);
     }
   };
 
@@ -185,37 +235,54 @@ export default function App() {
   useEffect(() => {
     const isCountingDown = !isWorkMode || (isWorkMode && workIsTimed);
     if (isCountingDown) {
-      if (timeLeft === 3 || timeLeft === 2 || timeLeft === 1) {
-        triggerHaptic();
-        playSound('tick');
+      if (timeLeft <= countdownSeconds && timeLeft > 0) {
+        if (!isWorkMode) {
+          triggerHaptic();
+          playSound(soundRestCountdown);
+        } else {
+          // You asked for the timer countdown beep logic to trigger.
+          // Applying the same to Work Phase tick alerts for consistency if needed.
+          triggerHaptic();
+          playSound(soundRestCountdown); // Assuming map tick alert equally
+        }
       }
+      
       if (timeLeft === 0) {
         if (isWorkMode) {
           // Work timer hit 0: Auto switch to Rest
           triggerHaptic(true);
-          playSound('chime');
+
+          if (setCount >= targetSets) {
+            playSound(soundEndWork === 'Silent' ? 'Silent' : 'FinalDone');
+          } else {
+            playSound(soundEndWork);
+          }
+
           setIsWorkMode(false);
           setTimeLeft(restDuration);
         } else {
           // Rest timer hit 0: Respect restEndAction
           if (restEndAction === 'Auto-Start') {
             triggerHaptic(true);
-            playSound('chime');
+            playSound(soundStartWork);
             setIsWorkMode(true);
             setSetCount(prev => prev + 1);
             setTimeLeft(workIsTimed ? workDuration : 0);
           } else if (restEndAction === 'Hard Stop') {
             triggerHaptic(true);
-            playSound('chime');
+            playSound(soundStartWork);
+          } else if (restEndAction === 'Overtime') {
+            triggerHaptic(true);
+            playSound(soundOvertime);
           }
         }
       }
     }
-  }, [timeLeft, isWorkMode, restEndAction, workIsTimed, workDuration, restDuration, hapticLevel, soundAlerts]);
+  }, [timeLeft, isWorkMode, restEndAction, workIsTimed, workDuration, restDuration, hapticLevel, soundAlerts, countdownSeconds, alertVolume, soundStartWork, soundRestCountdown, soundOvertime]);
 
   const handlePress = async () => {
     triggerHaptic(true);
-    if (!isWorkMode) playSound('chime');
+    if (!isWorkMode) playSound(soundStartWork);
     const newMode = !isWorkMode;
 
     // Changing from Rest to Work -> new set starting
@@ -249,7 +316,6 @@ export default function App() {
   };
 
   const handleDurationChange = (isWork, change) => {
-    triggerHaptic();
     if (isWork) {
       setWorkDuration(r => Math.max(5, r + change));
     } else {
@@ -258,7 +324,6 @@ export default function App() {
   };
 
   const handleTargetSetsChange = (change) => {
-    triggerHaptic();
     setTargetSets(prev => Math.max(1, prev + change));
   };
 
@@ -297,8 +362,8 @@ export default function App() {
         }}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
+          <View style={[styles.modalCard, { maxHeight: '85%', padding: 0 }]}>
+            <View style={[styles.modalHeader, { padding: 25, paddingBottom: 15, marginBottom: 0 }]}>
               <Text style={styles.modalTitle}>CONTROL PANEL</Text>
               <TouchableOpacity onPress={() => {
                 setSettingsVisible(false);
@@ -308,80 +373,141 @@ export default function App() {
               </TouchableOpacity>
             </View>
             
-            <View style={[styles.settingsRow, { width: '100%' }]}>
-              <Text style={styles.settingsLabelDark}>Sound Alerts</Text>
-              <Switch
-                value={soundAlerts}
-                onValueChange={setSoundAlerts}
-                trackColor={{ false: '#767577', true: workColor }}
-                thumbColor={soundAlerts ? '#fff' : '#f4f3f4'}
-              />
-            </View>
-            
-            <View style={[styles.settingsRow, { width: '100%', flexDirection: 'column', alignItems: 'flex-start' }]}>
-              <Text style={[styles.settingsLabelDark, { marginBottom: 10 }]}>HAPTIC INTENSITY</Text>
-              <View style={[styles.segmentContainer, { marginTop: 0 }]}>
-                {['OFF', 'LOW', 'HIGH'].map((levelStr, index) => (
-                  <Pressable
-                    key={levelStr}
-                    style={[
-                      styles.segmentBtn,
-                      hapticLevel === index && { backgroundColor: workColor }
-                    ]}
-                    onPress={() => {
-                      setHapticLevel(index);
-                      if (index === 0) {
-                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                      } else if (index === 1) {
-                        Haptics.selectionAsync();
-                      } else if (index === 2) {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                      }
-                    }}
-                  >
-                    <Text style={[
-                      styles.segmentBtnText,
-                      hapticLevel === index && styles.segmentBtnTextActive
-                    ]}>
-                      {levelStr}
-                    </Text>
-                  </Pressable>
-                ))}
+            <ScrollView style={{ width: '100%' }} contentContainerStyle={{ paddingHorizontal: 25, paddingBottom: 25 }} showsVerticalScrollIndicator={false}>
+              
+              <View style={[styles.settingsRow, { width: '100%', marginBottom: isAudioExpanded ? 15 : 0 }]}>
+                <TouchableOpacity activeOpacity={0.7} onPress={() => setIsAudioExpanded(!isAudioExpanded)} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={styles.settingsLabelDark}>AUDIO CONFIG</Text>
+                  <Text style={[styles.sectionHeaderIcon, { color: 'rgba(255,255,255,0.6)', marginLeft: 8 }]}>{isAudioExpanded ? '▼' : '▶'}</Text>
+                </TouchableOpacity>
+                <Switch
+                  value={soundAlerts}
+                  onValueChange={setSoundAlerts}
+                  trackColor={{ false: '#767577', true: workColor }}
+                  thumbColor={soundAlerts ? '#fff' : '#f4f3f4'}
+                />
               </View>
-            </View>
 
-            {showConfirmReset ? (
-              <View style={styles.confirmResetContainer}>
-                <Text style={styles.confirmResetText}>Are you sure? This will delete all sets.</Text>
-                <View style={styles.confirmResetRow}>
-                  <TouchableOpacity 
-                    style={[styles.resetWorkoutBtn, styles.cancelResetBtn]}
-                    onPress={() => setShowConfirmReset(false)}
-                  >
-                    <Text style={styles.cancelResetBtnText}>CANCEL</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[styles.resetWorkoutBtn, styles.confirmResetBtn]}
-                    onPress={() => {
-                      handleResetSet();
-                      setIsWorkMode(true);
-                      setTimeLeft(workIsTimed ? workDuration : 0);
-                      setSettingsVisible(false);
-                      setShowConfirmReset(false);
-                    }}
-                  >
-                    <Text style={styles.resetWorkoutBtnText}>YES, RESET</Text>
-                  </TouchableOpacity>
+              {isAudioExpanded && (
+                <View style={{ width: '100%', marginBottom: 15 }}>
+                  <View style={{ width: '100%', marginBottom: 10 }}>
+                    <TurboStepper
+                      label="Countdown Lead-in"
+                      value={countdownSeconds}
+                      formatValue={v => `${v}s`}
+                      decrementFn={() => setCountdownSeconds(prev => prev > 0 ? prev - 1 : 0)}
+                      incrementFn={() => setCountdownSeconds(prev => prev < 10 ? prev + 1 : 10)}
+                      triggerHaptic={triggerHaptic}
+                    />
+                  </View>
+
+                  <View style={{ width: '100%', marginBottom: 15 }}>
+                    <TurboStepper
+                      label="Alert Volume"
+                      value={Math.round(alertVolume * 10)}
+                      formatValue={v => `${v * 10}%`}
+                      decrementFn={() => handleVolumeChange(-0.1)}
+                      incrementFn={() => handleVolumeChange(0.1)}
+                      triggerHaptic={triggerHaptic}
+                    />
+                  </View>
+
+                  {[
+                    { label: 'START WORK', state: soundStartWork, set: setSoundStartWork },
+                    { label: 'REST COUNTDOWN', state: soundRestCountdown, set: setSoundRestCountdown },
+                    { label: 'OVERTIME', state: soundOvertime, set: setSoundOvertime },
+                    { label: 'END SET', state: soundEndWork, set: setSoundEndWork },
+                  ].map((mapItem) => (
+                    <View key={mapItem.label} style={{ width: '100%', marginBottom: 15 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <Text style={[styles.settingsLabelDark, { fontSize: 13 }]}>{mapItem.label}</Text>
+                        <TouchableOpacity onPress={() => playSound(mapItem.state)} style={styles.testBtn}>
+                          <Text style={styles.testBtnText}>▶️</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <View style={[styles.segmentContainer, { marginTop: 0 }]}>
+                        {['Silent', 'Tick', 'Done', 'FinalDone'].map(opt => (
+                          <Pressable 
+                            key={opt} 
+                            onPress={() => mapItem.set(opt)} 
+                            style={[styles.segmentBtn, mapItem.state === opt && { backgroundColor: workColor }]}
+                          >
+                            <Text style={[styles.segmentBtnText, mapItem.state === opt && styles.segmentBtnTextActive]}>{opt}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)', width: '100%', marginVertical: 15 }} />
+
+              <View style={[styles.settingsRow, { width: '100%', flexDirection: 'column', alignItems: 'flex-start' }]}>
+                <Text style={[styles.settingsLabelDark, { marginBottom: 10 }]}>HAPTIC INTENSITY</Text>
+                <View style={[styles.segmentContainer, { marginTop: 0 }]}>
+                  {['OFF', 'LOW', 'HIGH'].map((levelStr, index) => (
+                    <Pressable
+                      key={levelStr}
+                      style={[
+                        styles.segmentBtn,
+                        hapticLevel === index && { backgroundColor: workColor }
+                      ]}
+                      onPress={() => {
+                        setHapticLevel(index);
+                        if (index === 0) {
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                        } else if (index === 1) {
+                          Haptics.selectionAsync();
+                        } else if (index === 2) {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                        }
+                      }}
+                    >
+                      <Text style={[
+                        styles.segmentBtnText,
+                        hapticLevel === index && styles.segmentBtnTextActive
+                      ]}>
+                        {levelStr}
+                      </Text>
+                    </Pressable>
+                  ))}
                 </View>
               </View>
-            ) : (
-              <TouchableOpacity 
-                style={styles.resetWorkoutBtn}
-                onPress={() => setShowConfirmReset(true)}
-              >
-                <Text style={styles.resetWorkoutBtnText}>RESET WORKOUT</Text>
-              </TouchableOpacity>
-            )}
+
+              {showConfirmReset ? (
+                <View style={styles.confirmResetContainer}>
+                  <Text style={styles.confirmResetText}>Are you sure? This will delete all sets.</Text>
+                  <View style={styles.confirmResetRow}>
+                    <TouchableOpacity 
+                      style={[styles.resetWorkoutBtn, styles.cancelResetBtn]}
+                      onPress={() => setShowConfirmReset(false)}
+                    >
+                      <Text style={styles.cancelResetBtnText}>CANCEL</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.resetWorkoutBtn, styles.confirmResetBtn]}
+                      onPress={() => {
+                        handleResetSet();
+                        setIsWorkMode(true);
+                        setTimeLeft(workIsTimed ? workDuration : 0);
+                        setSettingsVisible(false);
+                        setShowConfirmReset(false);
+                      }}
+                    >
+                      <Text style={styles.resetWorkoutBtnText}>YES, RESET</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity 
+                  style={styles.resetWorkoutBtn}
+                  onPress={() => setShowConfirmReset(true)}
+                >
+                  <Text style={styles.resetWorkoutBtnText}>RESET WORKOUT</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -819,16 +945,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalCard: {
-    width: '85%',
-    backgroundColor: '#333',
-    borderRadius: 24,
-    padding: 24,
+    backgroundColor: '#1E1E1E',
+    padding: 25, // Updated default padding 20 -> 25 to give volume modal components some breathing space
+    borderRadius: 20,
+    width: '90%',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 10,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  testBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  testBtnText: {
+    fontSize: 16,
   },
   modalHeader: {
     flexDirection: 'row',
