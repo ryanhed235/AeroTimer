@@ -125,8 +125,11 @@ export default function App() {
   };
 
   const commitSetData = () => {
+    const setPrefix = `Set ${setCount}:`;
+    if (setHistory.some(entry => entry.startsWith(setPrefix))) return;
+
     const val = repsCompleted.trim() !== '' ? repsCompleted.trim() : lastReps;
-    setSetHistory(prev => [...prev, `Set ${setCount}: ${val} reps`]);
+    setSetHistory(prev => [...prev, `${setPrefix} ${val} reps`]);
     setLastReps(val);
     setRepsCompleted('');
   };
@@ -294,6 +297,7 @@ export default function App() {
   }, [timeLeft, isWorkMode, restEndAction, workIsTimed, workDuration, restDuration, hapticLevel, soundAlerts, countdownSeconds, alertVolume, soundStartWork, soundRestCountdown, soundOvertime]);
 
   const handlePress = async () => {
+    if (showSummary) return;
     triggerHaptic(true);
 
     if (isWorkMode) {
@@ -545,8 +549,8 @@ export default function App() {
       <Pressable style={StyleSheet.absoluteFillObject} onPress={handlePress} />
 
       {showSummary ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', width: '100%', paddingHorizontal: 20 }}>
-          <Text style={[styles.timerText, { fontSize: 40, color: workColor, marginBottom: 10, textAlign: 'center' }]}>WORKOUT COMPLETE</Text>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', width: '100%', paddingHorizontal: 20, backgroundColor: workColor }}>
+          <Text style={[styles.timerText, { fontSize: 40, color: '#000', marginBottom: 10, textAlign: 'center' }]}>WORKOUT COMPLETE</Text>
           <Text style={{ color: 'white', fontSize: 20, marginBottom: 30, fontFamily: 'monospace' }}>{targetSets} Sets Logged</Text>
           
           <ScrollView style={{ width: '100%', maxHeight: 250, marginBottom: 30, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 15, padding: 15 }}>
@@ -615,7 +619,7 @@ export default function App() {
             style={styles.repsInput}
             value={repsCompleted}
             onChangeText={setRepsCompleted}
-            placeholder="0"
+            placeholder={lastReps}
             placeholderTextColor="rgba(255,255,255,0.5)"
             keyboardType="number-pad"
             maxLength={3}
@@ -802,7 +806,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 5,
-    marginTop: 15,
+    marginTop: 0,
     paddingVertical: 10,
   },
   hudDivider: {
