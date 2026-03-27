@@ -80,6 +80,8 @@ export default function App() {
   const [workDuration, setWorkDuration] = useState(40);
   const [setCount, setSetCount] = useState(1);
   const [targetSets, setTargetSets] = useState(3);
+  const [showSummary, setShowSummary] = useState(false);
+  const [lastReps, setLastReps] = useState('0');
 
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [soundAlerts, setSoundAlerts] = useState(true);
@@ -120,6 +122,13 @@ export default function App() {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       }
     }
+  };
+
+  const commitSetData = () => {
+    const val = repsCompleted.trim() !== '' ? repsCompleted.trim() : lastReps;
+    setSetHistory(prev => [...prev, `Set ${setCount}: ${val} reps`]);
+    setLastReps(val);
+    setRepsCompleted('');
   };
 
   const tickSoundRef = useRef(null);
@@ -254,18 +263,22 @@ export default function App() {
 
           if (setCount >= targetSets) {
             playSound(soundEndWork === 'Silent' ? 'Silent' : 'FinalDone');
+            commitSetData();
+            setIsWorkMode(false);
+            setTimeLeft(0);
+            setShowSummary(true);
           } else {
             playSound(soundEndWork);
+            setIsWorkMode(false);
+            setTimeLeft(restDuration);
           }
-
-          setIsWorkMode(false);
-          setTimeLeft(restDuration);
         } else {
           // Rest timer hit 0: Respect restEndAction
           if (restEndAction === 'Auto-Start') {
             triggerHaptic(true);
             playSound(soundStartWork);
             setIsWorkMode(true);
+            commitSetData();
             setSetCount(prev => prev + 1);
             setTimeLeft(workIsTimed ? workDuration : 0);
           } else if (restEndAction === 'Hard Stop') {
@@ -282,17 +295,27 @@ export default function App() {
 
   const handlePress = async () => {
     triggerHaptic(true);
-    if (!isWorkMode) playSound(soundStartWork);
+
+    if (isWorkMode) {
+      if (setCount >= targetSets) {
+        playSound(soundEndWork === 'Silent' ? 'Silent' : 'FinalDone');
+        commitSetData();
+        setIsWorkMode(false);
+        setTimeLeft(0);
+        setShowSummary(true);
+        return;
+      } else {
+        playSound(soundEndWork);
+      }
+    } else {
+      playSound(soundStartWork);
+    }
+
     const newMode = !isWorkMode;
 
     // Changing from Rest to Work -> new set starting
     if (newMode) {
-      if (repsCompleted.trim() !== '') {
-        setSetHistory(prev => [...prev, `Set ${setCount}: ${repsCompleted} reps`]);
-      } else {
-        setSetHistory(prev => [...prev, `Set ${setCount}: Done`]);
-      }
-      setRepsCompleted('');
+      commitSetData();
       setSetCount(prev => prev + 1);
     }
 
@@ -304,6 +327,12 @@ export default function App() {
     triggerHaptic();
     setSetCount(1);
     setSetHistory([]);
+    setLastReps('0');
+    setShowSummary(false);
+    setIsWorkMode(true);
+    setTimeLeft(workIsTimed ? workDuration : 0);
+    setIsWorkExpanded(true);
+    setIsRestExpanded(true);
   };
 
   const handlePresetPress = (duration) => {
@@ -515,10 +544,40 @@ export default function App() {
       {/* Background press area */}
       <Pressable style={StyleSheet.absoluteFillObject} onPress={handlePress} />
 
-      <View style={styles.content} pointerEvents="box-none">
-        <Pressable onLongPress={handleResetSet} delayLongPress={800} style={styles.setHeaderContainer}>
-          <Text style={styles.setHeaderText}>SET {setCount}</Text>
-        </Pressable>
+      {showSummary ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', width: '100%', paddingHorizontal: 20 }}>
+          <Text style={[styles.timerText, { fontSize: 40, color: workColor, marginBottom: 10, textAlign: 'center' }]}>WORKOUT COMPLETE</Text>
+          <Text style={{ color: 'white', fontSize: 20, marginBottom: 30, fontFamily: 'monospace' }}>{targetSets} Sets Logged</Text>
+          
+          <ScrollView style={{ width: '100%', maxHeight: 250, marginBottom: 30, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 15, padding: 15 }}>
+            {setHistory.map((item, index) => (
+              <Text key={index} style={[styles.historyText, { textAlign: 'center', fontSize: 18, marginBottom: 8 }]}>{item}</Text>
+            ))}
+          </ScrollView>
+
+          <TouchableOpacity onPress={handleResetSet} style={[styles.resetWorkoutBtn, { width: '100%', marginBottom: 15, padding: 20 }]}>
+            <Text style={styles.resetWorkoutBtnText}>FINISH WORKOUT</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={() => {
+              triggerHaptic();
+              setShowSummary(false);
+              setTargetSets(prev => prev + 1);
+              setIsWorkMode(false);
+              setTimeLeft(restDuration);
+            }} 
+            style={[styles.resetWorkoutBtn, { width: '100%', backgroundColor: workColor, padding: 20 }]}
+          >
+            <Text style={[styles.resetWorkoutBtnText, { color: '#000' }]}>ADD SET TO CONTINUE</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          <View style={styles.content} pointerEvents="box-none">
+            <Pressable onLongPress={handleResetSet} delayLongPress={800} style={styles.setHeaderContainer}>
+              <Text style={styles.setHeaderText}>SET {setCount}</Text>
+            </Pressable>
 
         <TextInput
           style={styles.exerciseInput}
@@ -564,7 +623,7 @@ export default function App() {
         </View>
 
         <View style={styles.bottomControls}>
-          <TouchableOpacity activeOpacity={0.7} onPress={() => setIsWorkExpanded(!isWorkExpanded)} style={styles.sectionHeader}>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => setIsWorkExpanded(!isWorkExpanded)} style={styles.sectionHeader} hitSlop={{top: 2, bottom: 2}}>
             <Text style={styles.sectionHeaderText}>SESSION SETTINGS</Text>
             <View style={styles.sectionLine} />
             <Text style={styles.sectionHeaderIcon}>{isWorkExpanded ? '▼' : '▶'}</Text>
@@ -605,7 +664,7 @@ export default function App() {
             </View>
           )}
 
-          <TouchableOpacity activeOpacity={0.7} onPress={() => setIsRestExpanded(!isRestExpanded)} style={styles.sectionHeader}>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => setIsRestExpanded(!isRestExpanded)} style={styles.sectionHeader} hitSlop={{top: 2, bottom: 2}}>
             <Text style={styles.sectionHeaderText}>REST SETTINGS</Text>
             <View style={styles.sectionLine} />
             <Text style={styles.sectionHeaderIcon}>{isRestExpanded ? '▼' : '▶'}</Text>
@@ -652,6 +711,8 @@ export default function App() {
           )}
         </View>
       </ScrollView>
+      </>
+      )}
 
       {keyboardHeight > 0 && (
         <TouchableOpacity
@@ -740,8 +801,9 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
-    marginTop: 10,
+    marginBottom: 5,
+    marginTop: 15,
+    paddingVertical: 10,
   },
   hudDivider: {
     height: 2,
@@ -752,15 +814,17 @@ const styles = StyleSheet.create({
   },
   sectionHeaderText: {
     color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
+    fontSize: 16,
     fontWeight: 'bold',
     letterSpacing: 1,
     marginRight: 10,
+    flexShrink: 0,
   },
   sectionLine: {
     flex: 1,
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.2)',
+    maxWidth: '25%',
   },
   settingsRow: {
     flexDirection: 'row',
