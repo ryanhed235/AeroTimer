@@ -82,6 +82,7 @@ export default function App() {
   const [targetSets, setTargetSets] = useState(3);
   const [showSummary, setShowSummary] = useState(false);
   const [lastReps, setLastReps] = useState('0');
+  const [lastWorkTime, setLastWorkTime] = useState(0);
 
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [soundAlerts, setSoundAlerts] = useState(true);
@@ -125,11 +126,25 @@ export default function App() {
   };
 
   const commitSetData = () => {
-    const setPrefix = `Set ${setCount}:`;
-    if (setHistory.some(entry => entry.startsWith(setPrefix))) return;
+    if (setHistory.some(entry => entry.setNum && entry.setNum === setCount.toString())) return;
 
     const val = repsCompleted.trim() !== '' ? repsCompleted.trim() : lastReps;
-    setSetHistory(prev => [...prev, `${setPrefix} ${val} reps`]);
+    const formattedWork = typeof formatTime === 'function' ? formatTime(lastWorkTime) : `${lastWorkTime}s`;
+    
+    let entryObj = {
+      setNum: setCount.toString(),
+      workDesc: formattedWork,
+      repsDesc: val,
+      restDesc: null
+    };
+
+    if (setCount < targetSets) {
+      const actualRest = Math.max(0, restDuration - timeLeft);
+      const formattedRest = typeof formatTime === 'function' ? formatTime(actualRest) : `${actualRest}s`;
+      entryObj.restDesc = formattedRest;
+    }
+
+    setSetHistory(prev => [entryObj, ...prev]);
     setLastReps(val);
     setRepsCompleted('');
   };
@@ -262,6 +277,7 @@ export default function App() {
       if (timeLeft === 0) {
         if (isWorkMode) {
           // Work timer hit 0: Auto switch to Rest
+          setLastWorkTime(workDuration);
           triggerHaptic(true);
 
           if (setCount >= targetSets) {
@@ -301,6 +317,9 @@ export default function App() {
     triggerHaptic(true);
 
     if (isWorkMode) {
+      const actualWork = workIsTimed ? Math.max(0, workDuration - timeLeft) : timeLeft;
+      setLastWorkTime(actualWork);
+
       if (setCount >= targetSets) {
         playSound(soundEndWork === 'Silent' ? 'Silent' : 'FinalDone');
         commitSetData();
@@ -332,6 +351,7 @@ export default function App() {
     setSetCount(1);
     setSetHistory([]);
     setLastReps('0');
+    setLastWorkTime(0);
     setShowSummary(false);
     setIsWorkMode(true);
     setTimeLeft(workIsTimed ? workDuration : 0);
@@ -554,8 +574,19 @@ export default function App() {
           <Text style={{ color: 'white', fontSize: 20, marginBottom: 30, fontFamily: 'monospace' }}>{targetSets} Sets Logged</Text>
           
           <ScrollView style={{ width: '100%', maxHeight: 250, marginBottom: 30, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 15, padding: 15 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, paddingHorizontal: 5 }}>
+              <Text style={[styles.historyTitle, { flex: 0.8, textAlign: 'center', marginBottom: 0, fontSize: 14 }]}>SET</Text>
+              <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0, fontSize: 14 }]}>WORK</Text>
+              <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0, fontSize: 14 }]}>REPS</Text>
+              <Text style={[styles.historyTitle, { flex: 1, textAlign: 'right', marginBottom: 0, fontSize: 14 }]}>REST</Text>
+            </View>
             {setHistory.map((item, index) => (
-              <Text key={index} style={[styles.historyText, { textAlign: 'center', fontSize: 18, marginBottom: 8 }]}>{item}</Text>
+              <View key={index} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)', paddingBottom: 8, paddingHorizontal: 5 }}>
+                <Text style={[styles.historyText, { flex: 0.8, textAlign: 'center', fontSize: 16, marginBottom: 0, fontWeight: 'bold' }]}>{item.setNum}</Text>
+                <Text style={[styles.historyText, { flex: 1, textAlign: 'center', fontSize: 16, marginBottom: 0 }]}>{item.workDesc}</Text>
+                <Text style={[styles.historyText, { flex: 1, textAlign: 'center', fontSize: 16, marginBottom: 0 }]}>{item.repsDesc}</Text>
+                <Text style={[styles.historyText, { flex: 1, textAlign: 'right', fontSize: 16, marginBottom: 0, color: 'rgba(255,255,255,0.6)' }]}>{item.restDesc ? item.restDesc : '---'}</Text>
+              </View>
             ))}
           </ScrollView>
 
@@ -707,9 +738,19 @@ export default function App() {
 
           {setHistory.length > 0 && (
             <View style={styles.historyContainer}>
-              <Text style={styles.historyTitle}>Set History</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, paddingHorizontal: 10 }}>
+                <Text style={[styles.historyTitle, { flex: 0.8, textAlign: 'center', marginBottom: 0 }]}>SET</Text>
+                <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>WORK</Text>
+                <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>REPS</Text>
+                <Text style={[styles.historyTitle, { flex: 1, textAlign: 'right', marginBottom: 0 }]}>REST</Text>
+              </View>
               {setHistory.map((entry, index) => (
-                <Text key={index} style={styles.historyText}>{entry}</Text>
+                <View key={index} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5, paddingHorizontal: 10 }}>
+                  <Text style={[styles.historyText, { flex: 0.8, textAlign: 'center', marginBottom: 0, fontWeight: 'bold' }]}>{entry.setNum}</Text>
+                  <Text style={[styles.historyText, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>{entry.workDesc}</Text>
+                  <Text style={[styles.historyText, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>{entry.repsDesc}</Text>
+                  <Text style={[styles.historyText, { flex: 1, textAlign: 'right', marginBottom: 0, color: 'rgba(255,255,255,0.6)' }]}>{entry.restDesc ? entry.restDesc : '---'}</Text>
+                </View>
               ))}
             </View>
           )}
