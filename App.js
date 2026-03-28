@@ -7,6 +7,9 @@ import { useKeepAwake } from 'expo-keep-awake';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import QRCode from 'react-native-qrcode-svg';
+import * as Linking from 'expo-linking';
 
 const tickAsset = require('./assets/sounds/tick.wav');
 const doneAsset = require('./assets/sounds/done.wav');
@@ -132,19 +135,17 @@ export default function App() {
     if (setHistory.some(entry => entry.setNum && entry.setNum === setCount.toString())) return;
 
     const val = repsCompleted.trim() !== '' ? repsCompleted.trim() : lastReps;
-    const formattedWork = typeof formatTime === 'function' ? formatTime(lastWorkTime) : `${lastWorkTime}s`;
     
-    let entryObj = {
+    const entryObj = {
       setNum: setCount.toString(),
-      workDesc: formattedWork,
+      workDesc: formatTime(lastWorkTime),
       repsDesc: val,
       restDesc: null
     };
 
     if (setCount < targetSets) {
       const actualRest = Math.max(0, restDuration - timeLeft);
-      const formattedRest = typeof formatTime === 'function' ? formatTime(actualRest) : `${actualRest}s`;
-      entryObj.restDesc = formattedRest;
+      entryObj.restDesc = formatTime(actualRest);
     }
 
     setSetHistory(prev => [entryObj, ...prev]);
@@ -157,19 +158,20 @@ export default function App() {
       const timestamp = new Date().toLocaleString().replace(/[\u202F\u00A0]/g, ' ');
       let csvString = `Workout Log Export - ${timestamp}\n`;
       csvString += `Exercise: ${exerciseName}\n\n`;
-      csvString += "Set,Reps,Rest Interval,Rest Duration\n";
+      csvString += "Set,Work Duration,Reps,Rest Interval,Rest Duration\n";
       
       const chronologicalLog = [...setHistory].reverse();
       
       chronologicalLog.forEach((entry, index) => {
         const setNumber = entry.setNum;
+        const workDurationVal = entry.workDesc || "00:00";
         const reps = entry.repsDesc;
         const isFinalSet = index === chronologicalLog.length - 1;
         
         const restInterval = isFinalSet ? "N/A" : `${setNumber}.5`;
-        const restDurationVal = isFinalSet ? "N/A" : (entry.restDesc || "0s");
+        const restDurationVal = isFinalSet ? "N/A" : (entry.restDesc || "00:00");
         
-        csvString += `${setNumber}, ${reps}, ${restInterval}, ${restDurationVal}\n`;
+        csvString += `${setNumber}, ${workDurationVal}, ${reps}, ${restInterval}, ${restDurationVal}\n`;
       });
       
       const fileName = `Workout_Log_${Date.now()}.csv`;
@@ -192,6 +194,114 @@ export default function App() {
       alert("Error exporting log");
     }
   };
+
+  const [savedTemplates, setSavedTemplates] = useState([]);
+
+  const encodeBase64 = (input) => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    let str = String(input);
+    let block, charCode, idx = 0, map = chars, output = '';
+    for (; str.charAt(idx | 0) || (map = '=', idx % 1); output += map.charAt(63 & block >> 8 - idx % 1 * 8)) {
+      charCode = str.charCodeAt(idx += 3/4);
+      block = block << 8 | charCode;
+    }
+    return output;
+  };
+
+  const decodeBase64 = (input) => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    let str = String(input).replace(/=+$/, '');
+    let js = '', bc = 0, bs, buffer, idx = 0;
+    for (; buffer = str.charAt(idx++); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? js += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
+      buffer = chars.indexOf(buffer);
+    }
+    return js;
+  };
+
+  const saveWorkoutTemplate = async (name) => {
+    try {
+      const template = {
+        name,
+        date: new Date().toISOString(),
+        config: { workDuration, restDuration, targetSets, workIsTimed }
+      };
+      
+      const str = await AsyncStorage.getItem('@aerotimer_templates');
+      const obj = str ? JSON.parse(str) : [];
+      obj.push(template);
+      
+      await AsyncStorage.setItem('@aerotimer_templates', JSON.stringify(obj));
+      alert(`Saved Template: ${name}`);
+      loadWorkoutTemplates();
+    } catch(e) {
+      console.error(e);
+      alert('Save Failed');
+    }
+  };
+
+  const loadWorkoutTemplates = async () => {
+    try {
+      const str = await AsyncStorage.getItem('@aerotimer_templates');
+      if (str) {
+        const obj = JSON.parse(str);
+        setSavedTemplates(obj);
+        if (obj.length > 0) {
+          const last = obj[obj.length - 1].config;
+          setWorkDuration(last.workDuration || 40);
+          setRestDuration(last.restDuration || 60);
+          setTargetSets(last.targetSets || 3);
+          setWorkIsTimed(last.workIsTimed || false);
+          alert('Latest Template Loaded');
+        }
+      } else {
+        alert('No templates found');
+      }
+    } catch(e) {
+      console.error(e);
+      alert('Load Failed');
+    }
+  };
+
+  const generateShareLink = () => {
+    try {
+      const config = { w: workDuration, r: restDuration, s: targetSets, t: workIsTimed ? 1 : 0 };
+      const base64Str = encodeBase64(JSON.stringify(config));
+      const url = `aerotimer://load?data=${base64Str}`;
+      console.log('Share URL:', url);
+      alert(`Stateless Link:\n\n${url}`);
+      return url;
+    } catch(e) {
+      console.error(e);
+    }
+  };
+
+  const parseShareLink = (url) => {
+    try {
+      if (!url || !url.includes('data=')) return;
+      const base64Str = url.split('data=')[1];
+      const decodedStr = decodeBase64(base64Str);
+      const config = JSON.parse(decodedStr);
+      if (config.w !== undefined) setWorkDuration(config.w);
+      if (config.r !== undefined) setRestDuration(config.r);
+      if (config.s !== undefined) setTargetSets(config.s);
+      if (config.t !== undefined) setWorkIsTimed(config.t === 1);
+      alert('Loaded Settings from Deep Link URI!');
+    } catch(e) {
+      console.error(e);
+      alert('Invalid QR Code / Link');
+    }
+  };
+
+  useEffect(() => {
+    const handleDeepLink = (event) => {
+      if (event.url) parseShareLink(event.url);
+    };
+    const linkSub = Linking.addEventListener('url', handleDeepLink);
+    Linking.getInitialURL().then(url => {
+      if (url) parseShareLink(url);
+    });
+    return () => linkSub.remove();
+  }, [workDuration, restDuration, targetSets, workIsTimed]);
 
   const tickSoundRef = useRef(null);
   const doneSoundRef = useRef(null);
@@ -424,7 +534,7 @@ export default function App() {
     setTargetSets(prev => Math.max(1, prev + change));
   };
 
-  const formatTime = (seconds) => {
+  function formatTime(seconds) {
     const absSeconds = Math.abs(seconds);
     const mins = Math.floor(absSeconds / 60);
     const secs = absSeconds % 60;
@@ -664,6 +774,18 @@ export default function App() {
             <Pressable onLongPress={handleResetSet} delayLongPress={800} style={styles.setHeaderContainer}>
               <Text style={styles.setHeaderText}>SET {setCount}</Text>
             </Pressable>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 20 }}>
+              <TouchableOpacity onPress={() => saveWorkoutTemplate('QuickSave ' + new Date().getSeconds())} style={{ padding: 10, marginHorizontal: 5, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 5 }}>
+                <Text style={{ color: '#fff', fontSize: 12 }}>TEST SAVE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={loadWorkoutTemplates} style={{ padding: 10, marginHorizontal: 5, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 5 }}>
+                <Text style={{ color: '#fff', fontSize: 12 }}>TEST LOAD</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={generateShareLink} style={{ padding: 10, marginHorizontal: 5, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 5 }}>
+                <Text style={{ color: '#fff', fontSize: 12 }}>TEST SHARE</Text>
+              </TouchableOpacity>
+            </View>
 
         <TextInput
           style={styles.exerciseInput}
