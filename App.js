@@ -4,6 +4,9 @@ import { useState, useEffect, useRef } from 'react';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
 import { useKeepAwake } from 'expo-keep-awake';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Clipboard from 'expo-clipboard';
 
 const tickAsset = require('./assets/sounds/tick.wav');
 const doneAsset = require('./assets/sounds/done.wav');
@@ -147,6 +150,47 @@ export default function App() {
     setSetHistory(prev => [entryObj, ...prev]);
     setLastReps(val);
     setRepsCompleted('');
+  };
+
+  const exportLog = async () => {
+    try {
+      const timestamp = new Date().toLocaleString().replace(/[\u202F\u00A0]/g, ' ');
+      let csvString = `Workout Log Export - ${timestamp}\n`;
+      csvString += `Exercise: ${exerciseName}\n\n`;
+      csvString += "Set,Reps,Rest Interval,Rest Duration\n";
+      
+      const chronologicalLog = [...setHistory].reverse();
+      
+      chronologicalLog.forEach((entry, index) => {
+        const setNumber = entry.setNum;
+        const reps = entry.repsDesc;
+        const isFinalSet = index === chronologicalLog.length - 1;
+        
+        const restInterval = isFinalSet ? "N/A" : `${setNumber}.5`;
+        const restDurationVal = isFinalSet ? "N/A" : (entry.restDesc || "0s");
+        
+        csvString += `${setNumber}, ${reps}, ${restInterval}, ${restDurationVal}\n`;
+      });
+      
+      const fileName = `Workout_Log_${Date.now()}.csv`;
+      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+      
+      await FileSystem.writeAsStringAsync(fileUri, csvString);
+      
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Export Workout Log',
+        });
+      } else {
+        await Clipboard.setStringAsync(csvString);
+        triggerHaptic(true);
+        alert("Sharing not available. Log copied to clipboard!"); 
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Error exporting log");
+    }
   };
 
   const tickSoundRef = useRef(null);
@@ -575,23 +619,30 @@ export default function App() {
           
           <ScrollView style={{ width: '100%', maxHeight: 250, marginBottom: 30, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 15, padding: 15 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, paddingHorizontal: 5 }}>
-              <Text style={[styles.historyTitle, { flex: 0.8, textAlign: 'center', marginBottom: 0, fontSize: 14 }]}>SET</Text>
+              <Text style={[styles.historyTitle, { flex: 0.8, textAlign: 'center', marginBottom: 0, fontSize: 14, transform: [{ translateX: -5 }] }]}>SET</Text>
               <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0, fontSize: 14 }]}>WORK</Text>
               <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0, fontSize: 14 }]}>REPS</Text>
-              <Text style={[styles.historyTitle, { flex: 1, textAlign: 'right', marginBottom: 0, fontSize: 14 }]}>REST</Text>
+              <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0, fontSize: 14, transform: [{ translateX: -20 }] }]}>REST</Text>
             </View>
             {setHistory.map((item, index) => (
               <View key={index} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)', paddingBottom: 8, paddingHorizontal: 5 }}>
-                <Text style={[styles.historyText, { flex: 0.8, textAlign: 'center', fontSize: 16, marginBottom: 0, fontWeight: 'bold' }]}>{item.setNum}</Text>
+                <Text style={[styles.historyText, { flex: 0.8, textAlign: 'center', fontSize: 16, marginBottom: 0, fontWeight: 'bold', transform: [{ translateX: -5 }] }]}>{item.setNum}</Text>
                 <Text style={[styles.historyText, { flex: 1, textAlign: 'center', fontSize: 16, marginBottom: 0 }]}>{item.workDesc}</Text>
                 <Text style={[styles.historyText, { flex: 1, textAlign: 'center', fontSize: 16, marginBottom: 0 }]}>{item.repsDesc}</Text>
-                <Text style={[styles.historyText, { flex: 1, textAlign: 'right', fontSize: 16, marginBottom: 0, color: 'rgba(255,255,255,0.6)' }]}>{item.restDesc ? item.restDesc : '---'}</Text>
+                <Text style={[styles.historyText, { flex: 1, textAlign: 'center', fontSize: 16, marginBottom: 0, color: 'rgba(255,255,255,0.6)', transform: [{ translateX: -20 }] }]}>{item.restDesc ? item.restDesc : '---'}</Text>
               </View>
             ))}
           </ScrollView>
 
           <TouchableOpacity onPress={handleResetSet} style={[styles.resetWorkoutBtn, { width: '100%', marginBottom: 15, padding: 20 }]}>
             <Text style={styles.resetWorkoutBtnText}>FINISH WORKOUT</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={exportLog} 
+            style={[styles.resetWorkoutBtn, { width: '100%', backgroundColor: 'transparent', borderColor: 'rgba(0,0,0,0.3)', borderWidth: 2, padding: 15, marginBottom: 15 }]}
+          >
+            <Text style={[styles.resetWorkoutBtnText, { color: '#000', fontSize: 16 }]}>EXPORT LOG</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -739,17 +790,17 @@ export default function App() {
           {setHistory.length > 0 && (
             <View style={styles.historyContainer}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, paddingHorizontal: 10 }}>
-                <Text style={[styles.historyTitle, { flex: 0.8, textAlign: 'center', marginBottom: 0 }]}>SET</Text>
+                <Text style={[styles.historyTitle, { flex: 0.8, textAlign: 'center', marginBottom: 0, transform: [{ translateX: -5 }] }]}>SET</Text>
                 <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>WORK</Text>
                 <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>REPS</Text>
-                <Text style={[styles.historyTitle, { flex: 1, textAlign: 'right', marginBottom: 0 }]}>REST</Text>
+                <Text style={[styles.historyTitle, { flex: 1, textAlign: 'center', marginBottom: 0, transform: [{ translateX: -20 }] }]}>REST</Text>
               </View>
               {setHistory.map((entry, index) => (
                 <View key={index} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5, paddingHorizontal: 10 }}>
-                  <Text style={[styles.historyText, { flex: 0.8, textAlign: 'center', marginBottom: 0, fontWeight: 'bold' }]}>{entry.setNum}</Text>
+                  <Text style={[styles.historyText, { flex: 0.8, textAlign: 'center', marginBottom: 0, fontWeight: 'bold', transform: [{ translateX: -5 }] }]}>{entry.setNum}</Text>
                   <Text style={[styles.historyText, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>{entry.workDesc}</Text>
                   <Text style={[styles.historyText, { flex: 1, textAlign: 'center', marginBottom: 0 }]}>{entry.repsDesc}</Text>
-                  <Text style={[styles.historyText, { flex: 1, textAlign: 'right', marginBottom: 0, color: 'rgba(255,255,255,0.6)' }]}>{entry.restDesc ? entry.restDesc : '---'}</Text>
+                  <Text style={[styles.historyText, { flex: 1, textAlign: 'center', marginBottom: 0, color: 'rgba(255,255,255,0.6)', transform: [{ translateX: -20 }] }]}>{entry.restDesc ? entry.restDesc : '---'}</Text>
                 </View>
               ))}
             </View>
